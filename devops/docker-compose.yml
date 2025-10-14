@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # Redis service for Asynq task queue
+  redis:
+    image: redis:7-alpine
+    container_name: asynqmon_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  # Asynqmon service - web UI for monitoring Asynq tasks
+  asynqmon:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: asynqmon_ui
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_ADDR=redis:6379
+      - PORT=8080
+    command: [
+      "--redis-addr=redis:6379",
+      "--port=8080"
+    ]
+    restart: unless-stopped
+
+  # Optional: Build Asynqmon from local source code (alternative port)
+  asynqmon-local:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: asynqmon_local
+    ports:
+      - "8081:8080"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_ADDR=redis:6379
+      - PORT=8080
+    command: [
+      "--redis-addr=redis:6379",
+      "--port=8080"
+    ]
+    restart: unless-stopped
+
+  # Optional: Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.37.0
+    container_name: asynqmon_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    profiles:
+      - metrics
+
+  # Asynqmon with Prometheus integration
+  asynqmon-with-prometheus:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: asynqmon_with_prometheus
+    ports:
+      - "8082:8080"
+    depends_on:
+      - redis
+      - prometheus
+    environment:
+      - REDIS_ADDR=redis:6379
+      - PORT=8080
+      - ENABLE_METRICS_EXPORTER=true
+      - PROMETHEUS_ADDR=http://prometheus:9090
+    command: [
+      "--redis-addr=redis:6379",
+      "--port=8080",
+      "--enable-metrics-exporter",
+      "--prometheus-addr=http://prometheus:9090"
+    ]
+    restart: unless-stopped
+    profiles:
+      - metrics
+
+  # Optional: Grafana for advanced metrics visualization
+  grafana:
+    image: grafana/grafana-enterprise
+    container_name: asynqmon_grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    restart: unless-stopped
+    profiles:
+      - metrics
+
+volumes:
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
